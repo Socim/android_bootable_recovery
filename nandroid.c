@@ -30,6 +30,9 @@
 #include "roots.h"
 #include "recovery_ui.h"
 
+#include "../../external/yaffs2/yaffs2/utils/mkyaffs2image.h"
+#include "../../external/yaffs2/yaffs2/utils/unyaffs.h"
+
 #include <sys/vfs.h>
 
 #include "extendedcommands.h"
@@ -108,22 +111,9 @@ typedef void (*file_event_callback)(const char* filename);
 typedef int (*nandroid_backup_handler)(const char* backup_path, const char* backup_file_image, int callback);
 
 static int mkyaffs2image_wrapper(const char* backup_path, const char* backup_file_image, int callback) {
-    char tmp[PATH_MAX];
-    sprintf(tmp, "cd %s ; mkyaffs2image . %s.img ; exit $?", backup_path, backup_file_image);
-
-    FILE *fp = __popen(tmp, "r");
-    if (fp == NULL) {
-        ui_print("Unable to execute mkyaffs2image.\n");
-        return -1;
-    }
-
-    while (fgets(tmp, PATH_MAX, fp) != NULL) {
-        tmp[PATH_MAX - 1] = NULL;
-        if (callback)
-            nandroid_callback(tmp);
-    }
-
-    return __pclose(fp);
+    char backup_file_image_with_extension[PATH_MAX];
+    sprintf(backup_file_image_with_extension, "%s.img", backup_file_image);
+    return mkyaffs2image(backup_path, backup_file_image_with_extension, 0, callback ? nandroid_callback : NULL);
 }
 
 static int tar_compress_wrapper(const char* backup_path, const char* backup_file_image, int callback) {
@@ -132,7 +122,7 @@ static int tar_compress_wrapper(const char* backup_path, const char* backup_file
 
     FILE *fp = __popen(tmp, "r");
     if (fp == NULL) {
-        ui_print("Unable to execute tar.\n");
+        ui_print("Unable to execute dedupe.\n");
         return -1;
     }
 
@@ -204,7 +194,7 @@ static void refresh_default_backup_handler() {
         strcpy(fmt, forced_backup_format);
     }
     else {
-        ensure_path_mounted("/sdcard");
+        ensure_path_mounted("/emmc");
         FILE* f = fopen(NANDROID_BACKUP_FORMAT_FILE, "r");
         if (NULL == f)
             return;
@@ -250,8 +240,9 @@ int nandroid_backup_partition_extended(const char* backup_path, const char* moun
     int ret = 0;
     char* name = basename(mount_point);
 
+    ensure_path_mounted("/emmc");
     struct stat file_info;
-    int callback = stat("/sdcard/clockworkmod/.hidenandroidprogress", &file_info) != 0;
+    int callback = stat("/emmc/clockworkmod/.hidenandroidprogress", &file_info) != 0;
 
     ui_print("Backing up %s...\n", name);
     if (0 != (ret = ensure_path_mounted(mount_point) != 0)) {
@@ -280,7 +271,7 @@ int nandroid_backup_partition_extended(const char* backup_path, const char* moun
     }
     if (0 != ret) {
         ui_print("Error while making a backup image of %s!\n", mount_point);
-        return ret;
+//        return ret;
     }
     return 0;
 }
@@ -371,14 +362,29 @@ int nandroid_backup(const char* backup_path)
             return ret;
     }
 
-    if (0 != stat("/sdcard/.android_secure", &s))
-    {
-        ui_print("No /sdcard/.android_secure found. Skipping backup of applications on external storage.\n");
-    }
-    else
-    {
-        if (0 != (ret = nandroid_backup_partition_extended(backup_path, "/sdcard/.android_secure", 0)))
-            return ret;
+    ensure_path_mounted("/emmc");
+    if( access( "/emmc/clockworkmod/.is_as_external", F_OK ) != -1) {
+	ensure_path_mounted("/sdcard");
+    	if (0 != stat("/sdcard/.android_secure", &s))
+    	{
+            ui_print("No /sdcard/.android_secure found...\n");
+    	}
+    	else
+    	{
+            if (0 != (ret = nandroid_backup_partition_extended(backup_path, "/sdcard/.android_secure", 0)))
+                return ret;
+    	}
+    } else {
+	ensure_path_mounted("/emmc");
+    	if (0 != stat("/emmc/.android_secure", &s))
+    	{
+            ui_print("No /emmc/.android_secure found...\n");
+    	}
+    	else
+    	{
+            if (0 != (ret = nandroid_backup_partition_extended(backup_path, "/emmc/.android_secure", 0)))
+                return ret;
+    	}
     }
 
     if (0 != (ret = nandroid_backup_partition_extended(backup_path, "/cache", 0)))
@@ -404,10 +410,11 @@ int nandroid_backup(const char* backup_path)
         return ret;
     }
     
-    sprintf(tmp, "chmod -R 777 %s ; chmod -R u+r,u+w,g+r,g+w,o+r,o+w /sdcard/clockworkmod ; chmod u+x,g+x,o+x /sdcard/clockworkmod/backup ; chmod u+x,g+x,o+x /sdcard/clockworkmod/blobs", backup_path);
+    // TODO: remove this hack in a few weeks.
+    sprintf(tmp, "chmod -R 777 %s ; chmod -R u+r,u+w,g+r,g+w,o+r,o+w /sdcard/clockworkmod ; chmod u+x,g+x,o+x /sdcard/clockworkmod ; chmod u+x,g+x,o+x /sdcard/clockworkmod/backup ; chmod u+x,g+x,o+x /sdcard/clockworkmod/blobs", backup_path);
     __system(tmp);
     sync();
-    ui_set_background(BACKGROUND_ICON_NONE);
+    ui_set_background(BACKGROUND_ICON_CLOCKWORK);
     ui_reset_progress();
     ui_print("\nBackup complete!\n");
     return 0;
@@ -416,21 +423,7 @@ int nandroid_backup(const char* backup_path)
 typedef int (*nandroid_restore_handler)(const char* backup_file_image, const char* backup_path, int callback);
 
 static int unyaffs_wrapper(const char* backup_file_image, const char* backup_path, int callback) {
-    char tmp[PATH_MAX];
-    sprintf(tmp, "cd %s ; unyaffs %s ; exit $?", backup_path, backup_file_image);
-    FILE *fp = __popen(tmp, "r");
-    if (fp == NULL) {
-        ui_print("Unable to execute unyaffs.\n");
-        return -1;
-    }
-
-    while (fgets(tmp, PATH_MAX, fp) != NULL) {
-        tmp[PATH_MAX - 1] = NULL;
-        if (callback)
-            nandroid_callback(tmp);
-    }
-
-    return __pclose(fp);
+    return unyaffs(backup_file_image, backup_path, callback ? nandroid_callback : NULL);
 }
 
 static int tar_extract_wrapper(const char* backup_file_image, const char* backup_path, int callback) {
@@ -438,7 +431,7 @@ static int tar_extract_wrapper(const char* backup_file_image, const char* backup
     sprintf(tmp, "cd $(dirname %s) ; cat %s* | tar xv ; exit $?", backup_path, backup_file_image);
     FILE *fp = __popen(tmp, "r");
     if (fp == NULL) {
-        ui_print("Unable to execute tar.\n");
+        ui_print("Unable to execute dedupe.\n");
         return -1;
     }
 
@@ -578,7 +571,8 @@ int nandroid_restore_partition_extended(const char* backup_path, const char* mou
 
     ensure_directory(mount_point);
 
-    int callback = stat("/sdcard/clockworkmod/.hidenandroidprogress", &file_info) != 0;
+    ensure_path_mounted("/emmc");
+    int callback = stat("/emmc/clockworkmod/.hidenandroidprogress", &file_info) != 0;
 
     ui_print("Restoring %s...\n", name);
     if (backup_filesystem == NULL) {
@@ -705,8 +699,17 @@ int nandroid_restore(const char* backup_path, int restore_boot, int restore_syst
             return ret;
     }
 
-    if (restore_data && 0 != (ret = nandroid_restore_partition_extended(backup_path, "/sdcard/.android_secure", 0)))
-        return ret;
+    ensure_path_mounted("/emmc");
+    if( access( "/emmc/clockworkmod/.is_as_external", F_OK ) != -1) {
+	if (restore_data && 0 != (ret = nandroid_restore_partition_extended(backup_path, "/sdcard/.android_secure", 0))) {
+	    return ret;
+    	}
+    }
+    else {
+	if (restore_data && 0 != (ret = nandroid_restore_partition_extended(backup_path, "/emmc/.android_secure", 0))) {
+            return ret;
+        }
+    }
 
     if (restore_cache && 0 != (ret = nandroid_restore_partition_extended(backup_path, "/cache", 0)))
         return ret;
@@ -715,7 +718,7 @@ int nandroid_restore(const char* backup_path, int restore_boot, int restore_syst
         return ret;
 
     sync();
-    ui_set_background(BACKGROUND_ICON_NONE);
+    ui_set_background(BACKGROUND_ICON_CLOCKWORK);
     ui_reset_progress();
     ui_print("\nRestore complete!\n");
     return 0;

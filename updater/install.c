@@ -81,8 +81,8 @@ Value* MountFn(const char* name, State* state, int argc, Expr* argv[]) {
 #ifdef HAVE_SELINUX
     char *secontext = NULL;
 
-    if (sehandle) {
-        selabel_lookup(sehandle, &secontext, mount_point, 0755);
+    if (sehnd) {
+        selabel_lookup(sehnd, &secontext, mount_point, 0755);
         setfscreatecon(secontext);
     }
 #endif
@@ -199,6 +199,11 @@ done:
 //    if fs_size == 0, then make_ext4fs uses the entire partition.
 //    if fs_size > 0, that is the size to use
 //    if fs_size < 0, then reserve that many bytes at the end of the partition
+
+struct selabel_handle;
+
+struct selabel_handle *sehnd;
+
 Value* FormatFn(const char* name, State* state, int argc, Expr* argv[]) {
     char* result = NULL;
     if (argc != 5) {
@@ -262,7 +267,7 @@ Value* FormatFn(const char* name, State* state, int argc, Expr* argv[]) {
         result = location;
 #ifdef USE_EXT4
     } else if (strcmp(fs_type, "ext4") == 0) {
-        int status = make_ext4fs(location, atoll(fs_size), mount_point, sehandle);
+        int status = make_ext4fs(location, atoll(fs_size), mount_point, sehnd);
         if (status != 0) {
             fprintf(stderr, "%s: make_ext4fs failed (%d) on %s",
                     name, status, location);
@@ -369,7 +374,7 @@ Value* PackageExtractDirFn(const char* name, State* state,
 
     bool success = mzExtractRecursive(za, zip_path, dest_path,
                                       MZ_EXTRACT_FILES_ONLY, &timestamp,
-                                      NULL, NULL, sehandle);
+                                      NULL, NULL, sehnd);
     free(zip_path);
     free(dest_path);
     return StringValue(strdup(success ? "t" : ""));

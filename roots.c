@@ -340,8 +340,6 @@ int ensure_path_unmounted(const char* path) {
     return unmount_mounted_volume(mv);
 }
 
-extern struct selabel_handle *sehandle;
-
 int format_volume(const char* volume) {
     Volume* v = volume_for_path(volume);
     if (v == NULL) {
@@ -400,8 +398,12 @@ int format_volume(const char* volume) {
         return 0;
     }
 
+struct selabel_handle;
+
+struct selabel_handle *sehnd;
+
     if (strcmp(v->fs_type, "ext4") == 0) {
-        int result = make_ext4fs(v->device, v->length, volume, sehandle);
+        int result = make_ext4fs(v->device, v->length, volume, sehnd);
         if (result != 0) {
             LOGE("format_volume: make_extf4fs failed on %s\n", v->device);
             return -1;

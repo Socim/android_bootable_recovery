@@ -16,6 +16,7 @@
 #include <sys/limits.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 
 #include <signal.h>
 #include <sys/wait.h>
@@ -31,6 +32,9 @@
 #include "roots.h"
 #include "recovery_ui.h"
 
+#include "../../external/yaffs2/yaffs2/utils/mkyaffs2image.h"
+#include "../../external/yaffs2/yaffs2/utils/unyaffs.h"
+
 #include "extendedcommands.h"
 #include "nandroid.h"
 #include "mounts.h"
@@ -40,7 +44,7 @@
 #include "mtdutils/mtdutils.h"
 #include "bmlutils/bmlutils.h"
 #include "cutils/android_reboot.h"
-
+#include "kyle.h"
 
 int signature_check_enabled = 1;
 int script_assert_enabled = 1;
@@ -104,7 +108,7 @@ int install_zip(const char* packagefilepath)
         ui_print("Installation aborted.\n");
         return 1;
     }
-    ui_set_background(BACKGROUND_ICON_NONE);
+    ui_set_background(BACKGROUND_ICON_CLOCKWORK);
     ui_print("\nInstall from sdcard complete.\n");
     return 0;
 }
@@ -121,7 +125,7 @@ void show_install_update_menu()
                                 NULL
     };
     
-    char* install_menu_items[] = {  "choose zip from sdcard",
+    char* install_menu_items[] = {  "choose zip from external sdcard",
                                     "apply /sdcard/update.zip",
                                     "toggle signature verification",
                                     NULL,
@@ -590,12 +594,14 @@ void show_mount_usb_storage_menu()
 
 int confirm_selection(const char* title, const char* confirm)
 {
+    ensure_path_mounted("/emmc");
     struct stat info;
-    if (0 == stat("/sdcard/clockworkmod/.no_confirm", &info))
+    if (0 == stat("/emmc/clockworkmod/.no_confirm", &info))
         return 1;
 
+    ensure_path_mounted("/emmc");
     char* confirm_headers[]  = {  title, "  THIS CAN NOT BE UNDONE.", "", NULL };
-    if (0 == stat("/sdcard/clockworkmod/.one_confirm", &info)) {
+    if (0 == stat("/emmc/clockworkmod/.one_confirm", &info)) {
         char* items[] = { "No",
                         confirm, //" Yes -- wipe partition",   // [1]
                         NULL };
@@ -624,7 +630,6 @@ int confirm_selection(const char* title, const char* confirm)
 #define TUNE2FS_BIN     "/sbin/tune2fs"
 #define E2FSCK_BIN      "/sbin/e2fsck"
 
-extern struct selabel_handle *sehandle;
 int format_device(const char *device, const char *path, const char *fs_type) {
     Volume* v = volume_for_path(path);
     if (v == NULL) {
@@ -690,6 +695,10 @@ int format_device(const char *device, const char *path, const char *fs_type) {
         return 0;
     }
 
+struct selabel_handle;
+
+struct selabel_handle *sehnd;
+
     if (strcmp(fs_type, "ext4") == 0) {
         int length = 0;
         if (strcmp(v->fs_type, "ext4") == 0) {
@@ -697,7 +706,7 @@ int format_device(const char *device, const char *path, const char *fs_type) {
             length = v->length;
         }
         reset_ext4fs_info();
-        int result = make_ext4fs(device, length, v->mount_point, sehandle);
+        int result = make_ext4fs(device, length, v->mount_point, sehnd);
         if (result != 0) {
             LOGE("format_volume: make_extf4fs failed on %s\n", device);
             return -1;
@@ -1041,10 +1050,10 @@ void show_nandroid_menu()
                                 NULL
     };
 
-    char* list[] = { "backup",
-                            "restore",
-                            "delete",
-                            "advanced restore",
+    char* list[] = { "backup to external",
+                            "restore from external",
+                            "delete from external",
+                            "advanced restore from external",
                             "free unused backup data",
                             "choose backup format",
                             NULL,
@@ -1264,6 +1273,7 @@ void show_advanced_menu()
                             "partition sdcard",
                             "partition external sdcard",
                             "partition internal sdcard",
+                            "fix permissions & remove stale data",
                             NULL
     };
 
@@ -1328,6 +1338,7 @@ void show_advanced_menu()
             case 6:
                 ensure_path_mounted("/system");
                 ensure_path_mounted("/data");
+                ensure_path_mounted("/emmc");
                 ui_print("Fixing permissions...\n");
                 __system("fix_permissions");
                 ui_print("Done!\n");
@@ -1340,6 +1351,13 @@ void show_advanced_menu()
                 break;
             case 9:
                 partition_sdcard("/emmc");
+                break;
+            case 10:
+               	ensure_path_mounted("/system");
+                ensure_path_mounted("/data");
+                ui_print("Fixing permissions & removing stale directories (logging disabled)...\n");
+                __system("fix_permissions -l -r");
+                ui_print("Done!\n");
                 break;
         }
     }
@@ -1460,11 +1478,11 @@ void handle_failure(int ret)
 {
     if (ret == 0)
         return;
-    if (0 != ensure_path_mounted("/sdcard"))
+    if (0 != ensure_path_mounted("/emmc"))
         return;
-    mkdir("/sdcard/clockworkmod", S_IRWXU | S_IRWXG | S_IRWXO);
-    __system("cp /tmp/recovery.log /sdcard/clockworkmod/recovery.log");
-    ui_print("/tmp/recovery.log was copied to /sdcard/clockworkmod/recovery.log. Please open ROM Manager to report the issue.\n");
+    mkdir("/emmc/clockworkmod", S_IRWXU | S_IRWXG | S_IRWXO);
+    __system("cp /tmp/recovery.log /emmc/clockworkmod/recovery.log");
+    ui_print("/tmp/recovery.log was copied to /emmc/clockworkmod/recovery.log. Please open ROM Manager to report the issue.\n");
 }
 
 int is_path_mounted(const char* path) {
