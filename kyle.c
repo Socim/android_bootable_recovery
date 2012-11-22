@@ -504,7 +504,7 @@ void show_extras_menu()
 		show_custom_ors_menu("/emmc");
 		break;
 	    case 9:
-		ui_print("ClockworkMod Recovery 6.0.1.4 Touch Extra v13.4mod\n");
+		ui_print("ClockworkMod Recovery 6.0.1.9 Touch Extra v13.4mod\n");
 		ui_print("Mod for latest CM10 by Socim\n");
 		ui_print("Many thanks to sk8erwitskil (Kyle Laplante) for coding\n");
 		ui_print("Thanks to Amarullz for AROMA Filemanager(C)\n");
