@@ -796,6 +796,10 @@ int format_unknown_device(const char *device, const char* path, const char *fs_t
                 LOGI("error writing /data/.layout_version\n");
             }
         }
+        else {
+            LOGI("/data/media/0 not found. migration may occur.\n");
+        }
+    }
     else {
         // FIXME That's an error if the `path` contains an apostrophe.
         sprintf(tmp, "rm -rf '%s'", path);
